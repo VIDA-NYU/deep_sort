@@ -20,7 +20,7 @@ chi2inv95 = {
     9: 16.919}
 
 
-class KalmanFilter(object):
+class KalmanFilter:
     """
     A simple Kalman filter for tracking bounding boxes in image space.
 
@@ -37,20 +37,32 @@ class KalmanFilter(object):
 
     """
 
-    def __init__(self):
-        ndim, dt = 4, 1.
+    def __init__(self, ndim=2, dt=1.):
+        self.ndim = ndim
 
         # Create Kalman filter model matrices.
-        self._motion_mat = np.eye(2 * ndim, 2 * ndim)
+        self._motion_mat = np.eye(2 * 2 * ndim, 2 * 2 * ndim)
         for i in range(ndim):
-            self._motion_mat[i, ndim + i] = dt
-        self._update_mat = np.eye(ndim, 2 * ndim)
+            self._motion_mat[i, 2 * ndim + i] = dt
+        self._update_mat = np.eye(2 * ndim, 2 * 2 * ndim)
 
         # Motion and observation uncertainty are chosen relative to the current
         # state estimate. These weights control the amount of uncertainty in
         # the model. This is a bit hacky.
         self._std_weight_position = 1. / 20
         self._std_weight_velocity = 1. / 160
+        self._mask = np.ones(2 * ndim)
+        self._mask[self.ndim] = 0
+
+    def _cov(self, mean, pos_scale=1, vel_scale=1, aspect_pos=1e-2, aspect_vel=1e-5):
+        covariance = np.diag(np.square(np.r_[
+            self._xx(mean, self._std_weight_position, aspect_pos, pos_scale),
+            self._xx(mean, self._std_weight_velocity, aspect_vel, vel_scale),
+        ]))
+        return covariance
+
+    def _xx(self, mean, weight, aspect, scale=1):  # not sure what to call this
+        return scale * self._mask * weight * mean[self.ndim + 1] + (1 - self._mask) * aspect
 
     def initiate(self, measurement):
         """Create track from unassociated measurement.
@@ -69,20 +81,8 @@ class KalmanFilter(object):
             to 0 mean.
 
         """
-        mean_pos = measurement
-        mean_vel = np.zeros_like(mean_pos)
-        mean = np.r_[mean_pos, mean_vel]
-
-        std = [
-            2 * self._std_weight_position * measurement[3],
-            2 * self._std_weight_position * measurement[3],
-            1e-2,
-            2 * self._std_weight_position * measurement[3],
-            10 * self._std_weight_velocity * measurement[3],
-            10 * self._std_weight_velocity * measurement[3],
-            1e-5,
-            10 * self._std_weight_velocity * measurement[3]]
-        covariance = np.diag(np.square(std))
+        mean = np.r_[measurement, np.zeros_like(measurement)]
+        covariance = self._cov(mean, 2, 10)
         return mean, covariance
 
     def predict(self, mean, covariance):
@@ -104,22 +104,10 @@ class KalmanFilter(object):
             state. Unobserved velocities are initialized to 0 mean.
 
         """
-        std_pos = [
-            self._std_weight_position * mean[3],
-            self._std_weight_position * mean[3],
-            1e-2,
-            self._std_weight_position * mean[3]]
-        std_vel = [
-            self._std_weight_velocity * mean[3],
-            self._std_weight_velocity * mean[3],
-            1e-5,
-            self._std_weight_velocity * mean[3]]
-        motion_cov = np.diag(np.square(np.r_[std_pos, std_vel]))
-
+        motion_cov = self._cov(mean)
         mean = np.dot(self._motion_mat, mean)
         covariance = np.linalg.multi_dot((
             self._motion_mat, covariance, self._motion_mat.T)) + motion_cov
-
         return mean, covariance
 
     def project(self, mean, covariance):
@@ -139,12 +127,7 @@ class KalmanFilter(object):
             estimate.
 
         """
-        std = [
-            self._std_weight_position * mean[3],
-            self._std_weight_position * mean[3],
-            1e-1,
-            self._std_weight_position * mean[3]]
-        innovation_cov = np.diag(np.square(std))
+        innovation_cov = np.diag(np.square(self._xx(mean, self._std_weight_position, 1e-1)))
 
         mean = np.dot(self._update_mat, mean)
         covariance = np.linalg.multi_dot((
@@ -176,7 +159,8 @@ class KalmanFilter(object):
         chol_factor, lower = scipy.linalg.cho_factor(
             projected_cov, lower=True, check_finite=False)
         kalman_gain = scipy.linalg.cho_solve(
-            (chol_factor, lower), np.dot(covariance, self._update_mat.T).T,
+            (chol_factor, lower), 
+            np.dot(covariance, self._update_mat.T).T,
             check_finite=False).T
         innovation = measurement - projected_mean
 
@@ -217,13 +201,14 @@ class KalmanFilter(object):
         """
         mean, covariance = self.project(mean, covariance)
         if only_position:
-            mean, covariance = mean[:2], covariance[:2, :2]
-            measurements = measurements[:, :2]
+            mean, covariance = mean[:self.ndim], covariance[:self.ndim, :self.ndim]
+            measurements = measurements[:, :self.ndim]
 
-        cholesky_factor = np.linalg.cholesky(covariance)
-        d = measurements - mean
         z = scipy.linalg.solve_triangular(
-            cholesky_factor, d.T, lower=True, check_finite=False,
+            np.linalg.cholesky(covariance), 
+            (measurements - mean).T, 
+            lower=True, 
+            check_finite=False,
             overwrite_b=True)
         squared_maha = np.sum(z * z, axis=0)
         return squared_maha

@@ -9,6 +9,6 @@ setuptools.setup(
     author='Nicolai Wojke',
     url=f'https://github.com/nwojke/deep_sort',
     packages=setuptools.find_packages(),
-    install_requires=['numpy', 'opencv-python', 'scipy'],
+    install_requires=['numpy', 'opencv-python', 'scipy', 'fire'],
     license='GNU GENERAL PUBLIC LICENSE',
     keywords='deep sort online realtime tracking object detection tracker')

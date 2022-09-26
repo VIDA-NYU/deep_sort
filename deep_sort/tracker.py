@@ -37,13 +37,13 @@ class Tracker:
 
     """
 
-    def __init__(self, metric, max_iou_distance=0.7, max_age=30, n_init=3):
+    def __init__(self, metric, max_iou_distance=0.7, max_age=30, n_init=3, ndim=2):
         self.metric = metric
         self.max_iou_distance = max_iou_distance
         self.max_age = max_age
         self.n_init = n_init
 
-        self.kf = kalman_filter.KalmanFilter()
+        self.kf = kalman_filter.KalmanFilter(ndim=ndim)
         self.tracks = []
         self._next_id = 1
 
@@ -65,33 +65,37 @@ class Tracker:
 
         """
         # Run matching cascade.
-        matches, unmatched_tracks, unmatched_detections = \
-            self._match(detections)
+        matches, unmatched_tracks, unmatched_detections = self._match(detections)
 
-        # Update track set.
+        # Update matched tracks
         for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(
-                self.kf, detections[detection_idx])
+            self.tracks[track_idx].update(self.kf, detections[detection_idx])
+
+        # missed tracks
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
+
+        # new detections
         for detection_idx in unmatched_detections:
             self._initiate_track(detections[detection_idx])
+
+        # deleted tracks
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
         # Update distance metric.
-        active_targets = [t.track_id for t in self.tracks if t.is_confirmed()]
+        confirmed_tracks = [t for t in self.tracks if t.is_confirmed()]
+        active_targets = [t.track_id for t in confirmed_tracks]
         features, targets = [], []
-        for track in self.tracks:
-            if not track.is_confirmed():
-                continue
-            features += track.features
-            targets += [track.track_id for _ in track.features]
+        for track in confirmed_tracks:
+            features.extend(track.features)
+            targets.extend(track.track_id for _ in track.features)
             track.features = []
         self.metric.partial_fit(
-            np.asarray(features), np.asarray(targets), active_targets)
+            np.asarray(features), 
+            np.asarray(targets), 
+            np.asarray(active_targets))
 
     def _match(self, detections):
-
         def gated_metric(tracks, dets, track_indices, detection_indices):
             features = np.array([dets[i].feature for i in detection_indices])
             targets = np.array([tracks[i].track_id for i in track_indices])
@@ -99,7 +103,6 @@ class Tracker:
             cost_matrix = linear_assignment.gate_cost_matrix(
                 self.kf, cost_matrix, tracks, dets, track_indices,
                 detection_indices)
-
             return cost_matrix
 
         # Split track set into confirmed and unconfirmed tracks.
@@ -131,7 +134,7 @@ class Tracker:
         return matches, unmatched_tracks, unmatched_detections
 
     def _initiate_track(self, detection):
-        mean, covariance = self.kf.initiate(detection.to_xyah())
+        mean, covariance = self.kf.initiate(detection.xyah)
         self.tracks.append(Track(
             mean, covariance, self._next_id, self.n_init, self.max_age,
             detection.feature))

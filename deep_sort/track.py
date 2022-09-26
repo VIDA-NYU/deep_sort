@@ -1,5 +1,7 @@
 # vim: expandtab:ts=4:sw=4
-
+import collections
+import numpy as np
+from . import util
 
 class TrackState:
     """
@@ -64,7 +66,7 @@ class Track:
     """
 
     def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None):
+                 feature=None, meta=None, color=None):
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -80,34 +82,25 @@ class Track:
         self._n_init = n_init
         self._max_age = max_age
 
-    def to_tlwh(self):
-        """Get current position in bounding box format `(top left x, top left y,
-        width, height)`.
+        self.meta = collections.defaultdict(lambda: collections.deque(maxlen=400))
+        self._update_meta(meta)
 
-        Returns
-        -------
-        ndarray
-            The bounding box.
+        self.color = np.random.uniform(0, 1, size=3) if color is None else color
 
-        """
-        ret = self.mean[:4].copy()
-        ret[2] *= ret[3]
-        ret[:2] -= ret[2:] / 2
-        return ret
 
-    def to_tlbr(self):
-        """Get current position in bounding box format `(min x, miny, max x,
-        max y)`.
+    @property
+    def xyah(self):
+        return self.mean[:4].copy()
 
-        Returns
-        -------
-        ndarray
-            The bounding box.
+    @property
+    def tlwh(self):
+        return util.xyah2tlwh(self.xyah)
 
-        """
-        ret = self.to_tlwh()
-        ret[2:] = ret[:2] + ret[2:]
-        return ret
+    def _update_meta(self, meta):
+        smeta = self.meta
+        meta = meta or {}
+        for k in set(smeta)|set(meta):
+            smeta[k].append(meta.get(k))
 
     def predict(self, kf):
         """Propagate the state distribution to the current time step using a
@@ -135,8 +128,8 @@ class Track:
             The associated detection.
 
         """
-        self.mean, self.covariance = kf.update(
-            self.mean, self.covariance, detection.to_xyah())
+        self._update_meta(detection.meta)
+        self.mean, self.covariance = kf.update(self.mean, self.covariance, detection.xyah)
         self.features.append(detection.feature)
 
         self.hits += 1
@@ -145,16 +138,14 @@ class Track:
             self.state = TrackState.Confirmed
 
     def mark_missed(self):
-        """Mark this track as missed (no association at the current time step).
-        """
+        """Mark this track as missed (no association at the current time step)."""
         if self.state == TrackState.Tentative:
             self.state = TrackState.Deleted
         elif self.time_since_update > self._max_age:
             self.state = TrackState.Deleted
 
     def is_tentative(self):
-        """Returns True if this track is tentative (unconfirmed).
-        """
+        """Returns True if this track is tentative (unconfirmed)."""
         return self.state == TrackState.Tentative
 
     def is_confirmed(self):
