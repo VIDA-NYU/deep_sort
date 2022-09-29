@@ -27,7 +27,7 @@ class Detection:
     """
 
     def __init__(self, tlwh, confidence, feature, **meta):
-        self.tlwh = np.asarray(tlwh, dtype=np.float)
+        self.tlwh = np.asarray(tlwh, dtype=float)
         self.confidence = float(confidence)
         self.feature = np.asarray(feature, dtype=np.float32)
         self.meta = meta

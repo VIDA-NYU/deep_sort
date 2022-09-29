@@ -66,29 +66,34 @@ class Track:
 
     """
 
-    def __init__(self, mean, covariance, track_id, n_init, max_age, t_obs,
-                 feature=None, meta=None, color=None):
-        self.mean = mean
-        self.covariance = covariance
-        self.ndim = len(self.mean)//2
-        self.track_id = track_id
-        self.hits = 1
-        self.steps_since_update = 0
-        self.first_seen = self.last_seen = t_obs
-        self.last_predict_time = t_obs
-
-        self.state = TrackState.Tentative
-        self.features = []
-        if feature is not None:
-            self.features.append(feature)
-
+    def __init__(self, mean, covariance, track_id, detection, t_obs, color=None, n_init=3, max_age=30):
+        # params
         self._n_init = n_init
         self._max_age = max_age
 
-        self.meta = collections.defaultdict(lambda: collections.deque(maxlen=400))
-        self._update_meta(meta)
+        # initial position
+        self.mean = mean
+        self.covariance = covariance
+        self.ndim = len(self.mean)//2
 
+        # initial state
+        self.state = TrackState.Tentative
+        self.track_id = track_id
+        # initial time
+        self.first_seen = self.last_seen = t_obs
+        self.last_predict_time = t_obs
+        self.steps_since_update = 0
+        self.hits = 1
+
+        # generate a unique color for the track
         self.color = np.random.uniform(0, 1, size=3) if color is None else color
+
+        # tracking detection history
+        self.meta = []
+        self.features = []
+        if detection is not None:
+            self.meta.append(detection.meta)
+            self.features.append(detection.feature)
 
     @property
     def age(self):
@@ -113,12 +118,6 @@ class Track:
     @property
     def xywh(self):
         return util.xyah2xywh(self.xyah)
-
-    def _update_meta(self, meta):
-        smeta = self.meta
-        meta = meta or {}
-        for k in set(smeta)|set(meta):
-            smeta[k].append(meta.get(k))
 
     def predict(self, kf, t_obs):
         """Propagate the state distribution to the current time step using a
@@ -149,9 +148,9 @@ class Track:
             The associated detection.
 
         """
-        self._update_meta(detection.meta)
         self.mean, self.covariance = kf.update(self.mean, self.covariance, detection.xyah)
         self.features.append(detection.feature)
+        self.meta.append(detection.meta)
 
         self.hits += 1
         self.steps_since_update = 0
