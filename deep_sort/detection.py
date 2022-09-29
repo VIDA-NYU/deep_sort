@@ -35,3 +35,11 @@ class Detection:
     @property
     def xyah(self):
         return util.tlwh2xyah(self.tlwh.copy())
+
+    @property
+    def tlbr(self):
+        return util.tlwh2tlbr(self.tlwh.copy())
+
+    @property
+    def xywh(self):
+        return util.tlwh2xywh(self.tlwh.copy())

@@ -106,6 +106,14 @@ class Track:
     def tlwh(self):
         return util.xyah2tlwh(self.xyah)
 
+    @property
+    def tlbr(self):
+        return util.xyah2tlbr(self.xyah)
+    
+    @property
+    def xywh(self):
+        return util.xyah2xywh(self.xyah)
+
     def _update_meta(self, meta):
         smeta = self.meta
         meta = meta or {}
