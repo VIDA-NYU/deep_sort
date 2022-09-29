@@ -92,7 +92,11 @@ class Tracker:
         self._fit()
 
     def _match(self, detections):
+        # match confirmed tracks based on appearance, 
+        # match remaining unmatched/confirmed tracks with IoU
+
         def gated_metric(tracks, dets, track_indices, detection_indices):
+            '''Match based on appearance features.'''
             features = np.array([dets[i].feature for i in detection_indices])
             targets = np.array([tracks[i].track_id for i in track_indices])
             cost_matrix = self.metric.distance(features, targets)
@@ -113,7 +117,7 @@ class Tracker:
                 gated_metric, self.metric.matching_threshold, self.max_age,
                 self.tracks, detections, confirmed_tracks)
 
-        # get tracks that were visible in the last frame to do IoU comparison
+        # get unmatched tracks that were visible in the last frame to do IoU comparison
         iou_track_candidates = unconfirmed_tracks + [
             k for k in unmatched_tracks_a if
             self.tracks[k].steps_since_update <= 1]
@@ -140,6 +144,7 @@ class Tracker:
             features.extend(track.features)
             targets.extend(track.track_id for _ in track.features)
             track.features = []
+
         # Update distance metric.
         self.metric.partial_fit(
             np.asarray(features), 
