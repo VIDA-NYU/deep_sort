@@ -4,6 +4,11 @@ import numpy as np
 from . import linear_assignment
 from . import util
 
+# def fix_box_flip(tlwh, ndim=None):
+#     ndim = ndim or util.get_ndim(tlwh)
+#     tlwh[...,:ndim] -= np.minimum(0, tlwh[...,ndim:])
+#     tlwh[...,ndim:] = np.abs(tlwh[...,ndim:])
+#     return tlwh
 
 def iou(tlwh, candidates):
     """Computer intersection over union.
@@ -25,13 +30,13 @@ def iou(tlwh, candidates):
 
     """
     ndim = util.get_ndim(tlwh)
-    tlbr = util.tlwh2tlbr(tlwh)
-    candidates = util.tlwh2tlbr(candidates)
+    tlbr = util.tlwh2tlbr(tlwh.copy())
+    tlbr_can = util.tlwh2tlbr(candidates.copy())
 
     area_intersection = np.maximum(
         0., 
-        np.maximum(tlbr[ndim:], candidates[:, ndim:]) - 
-        np.minimum(tlbr[:ndim], candidates[:, :ndim])
+        np.maximum(tlbr[ndim:], tlbr_can[:, ndim:]) - 
+        np.minimum(tlbr[:ndim], tlbr_can[:, :ndim])
     ).prod(axis=1)
     area_bbox = tlwh[ndim:].prod()
     area_candidates = candidates[:, ndim:].prod(axis=1)
