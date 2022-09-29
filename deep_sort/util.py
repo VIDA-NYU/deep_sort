@@ -1,4 +1,4 @@
-
+import numpy as np
 
 
 def get_ndim(xs):
@@ -80,3 +80,11 @@ def xyah2tlbr(xyah, ndim=None):
 def tlbr2xyah(xyah, ndim=None):
     '''(top left, bottom right) => (center x, center y, width/height, height)'''
     return tlwh2xyah(tlbr2tlwh(xyah, ndim), ndim)
+
+# norm
+
+def norm(tlwh, shape):
+    return tlwh / np.asarray(shape[:2][::-1]*2)
+
+def unnorm(tlwh, shape):
+    return tlwh * np.asarray(shape[:2][::-1]*2)
