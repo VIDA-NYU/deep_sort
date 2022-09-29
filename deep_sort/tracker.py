@@ -47,15 +47,21 @@ class Tracker:
         self.tracks = []
         self._next_id = 1
 
-    def predict(self):
+    def step(self, detections, t_obs):
+        """Propagate track state distributions one time step forward and perform a state update.
+        """
+        self.predict(t_obs)
+        self.update(detections, t_obs)
+
+    def predict(self, t_obs):
         """Propagate track state distributions one time step forward.
 
         This function should be called once every time step, before `update`.
         """
         for track in self.tracks:
-            track.predict(self.kf)
+            track.predict(self.kf, t_obs)
 
-    def update(self, detections):
+    def update(self, detections, t_obs):
         """Perform measurement update and track management.
 
         Parameters
@@ -64,12 +70,12 @@ class Tracker:
             A list of detections at the current time step.
 
         """
-        # Run matching cascade.
+        # Run matching cascade - match detections to tracks
         matches, unmatched_tracks, unmatched_detections = self._match(detections)
 
         # Update matched tracks
         for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(self.kf, detections[detection_idx])
+            self.tracks[track_idx].update(self.kf, detections[detection_idx], t_obs)
 
         # missed tracks
         for track_idx in unmatched_tracks:
@@ -77,23 +83,13 @@ class Tracker:
 
         # new detections
         for detection_idx in unmatched_detections:
-            self._initiate_track(detections[detection_idx])
+            self._initiate_track(detections[detection_idx], t_obs)
 
         # deleted tracks
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
-        # Update distance metric.
-        confirmed_tracks = [t for t in self.tracks if t.is_confirmed()]
-        active_targets = [t.track_id for t in confirmed_tracks]
-        features, targets = [], []
-        for track in confirmed_tracks:
-            features.extend(track.features)
-            targets.extend(track.track_id for _ in track.features)
-            track.features = []
-        self.metric.partial_fit(
-            np.asarray(features), 
-            np.asarray(targets), 
-            np.asarray(active_targets))
+        # update nearest neighbors using features
+        self._fit()
 
     def _match(self, detections):
         def gated_metric(tracks, dets, track_indices, detection_indices):
@@ -117,13 +113,15 @@ class Tracker:
                 gated_metric, self.metric.matching_threshold, self.max_age,
                 self.tracks, detections, confirmed_tracks)
 
-        # Associate remaining tracks together with unconfirmed tracks using IOU.
+        # get tracks that were visible in the last frame to do IoU comparison
         iou_track_candidates = unconfirmed_tracks + [
             k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update == 1]
+            self.tracks[k].steps_since_update <= 1]
         unmatched_tracks_a = [
             k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update != 1]
+            self.tracks[k].steps_since_update > 1]
+
+        # Associate remaining tracks together with unconfirmed tracks using IOU.
         matches_b, unmatched_tracks_b, unmatched_detections = \
             linear_assignment.min_cost_matching(
                 iou_matching.iou_cost, self.max_iou_distance, self.tracks,
@@ -133,9 +131,29 @@ class Tracker:
         unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
         return matches, unmatched_tracks, unmatched_detections
 
-    def _initiate_track(self, detection):
+    def _fit(self):
+        # collect track features
+        confirmed_tracks = [t for t in self.tracks if t.is_confirmed()]
+        active_targets = [t.track_id for t in confirmed_tracks]
+        features, targets = [], []
+        for track in confirmed_tracks:
+            features.extend(track.features)
+            targets.extend(track.track_id for _ in track.features)
+            track.features = []
+        # Update distance metric.
+        self.metric.partial_fit(
+            np.asarray(features), 
+            np.asarray(targets), 
+            np.asarray(active_targets))
+
+    def _initiate_track(self, detection, t_obs):
+        # create new track
         mean, covariance = self.kf.initiate(detection.xyah)
         self.tracks.append(Track(
-            mean, covariance, self._next_id, self.n_init, self.max_age,
-            detection.feature))
+            mean, covariance, self._next_id, 
+            n_init=self.n_init, 
+            max_age=self.max_age,
+            t_obs=t_obs, 
+            feature=detection.feature,
+            meta=detection.meta))
         self._next_id += 1

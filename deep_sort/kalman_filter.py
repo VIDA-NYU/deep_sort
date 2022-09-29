@@ -41,9 +41,13 @@ class KalmanFilter:
         self.ndim = ndim
 
         # Create Kalman filter model matrices.
-        self._motion_mat = np.eye(2 * 2 * ndim, 2 * 2 * ndim)
+        # self._motion_mat = np.eye(2 * 2 * ndim, 2 * 2 * ndim)
+        # for i in range(ndim):
+        #     self._motion_mat[i, 2 * ndim + i] = dt
+        self._static_mat = np.eye(2 * 2 * ndim, 2 * 2 * ndim)
+        self._dynamic_mat = np.zeros((2 * 2 * ndim, 2 * 2 * ndim))
         for i in range(ndim):
-            self._motion_mat[i, 2 * ndim + i] = dt
+            self._dynamic_mat[i, 2 * ndim + i] = dt
         self._update_mat = np.eye(2 * ndim, 2 * 2 * ndim)
 
         # Motion and observation uncertainty are chosen relative to the current
@@ -51,8 +55,13 @@ class KalmanFilter:
         # the model. This is a bit hacky.
         self._std_weight_position = 1. / 20
         self._std_weight_velocity = 1. / 160
+
+        # this mask is for the state update - 
+        # zeros are for aspect ratio which has different dynamics
         self._mask = np.ones(2 * ndim)
         self._mask[self.ndim] = 0
+        if self.ndim == 3:
+            self._mask[-1] = 0
 
     def _cov(self, mean, pos_scale=1, vel_scale=1, aspect_pos=1e-2, aspect_vel=1e-5):
         covariance = np.diag(np.square(np.r_[
@@ -85,7 +94,7 @@ class KalmanFilter:
         covariance = self._cov(mean, 2, 10)
         return mean, covariance
 
-    def predict(self, mean, covariance):
+    def predict(self, mean, covariance, dt):
         """Run Kalman filter prediction step.
 
         Parameters
@@ -104,10 +113,11 @@ class KalmanFilter:
             state. Unobserved velocities are initialized to 0 mean.
 
         """
+        motion_mat = self._static_mat + self._dynamic_mat * dt
         motion_cov = self._cov(mean)
-        mean = np.dot(self._motion_mat, mean)
+        mean = np.dot(motion_mat, mean)
         covariance = np.linalg.multi_dot((
-            self._motion_mat, covariance, self._motion_mat.T)) + motion_cov
+            motion_mat, covariance, motion_mat.T)) + motion_cov
         return mean, covariance
 
     def project(self, mean, covariance):
@@ -127,14 +137,15 @@ class KalmanFilter:
             estimate.
 
         """
-        innovation_cov = np.diag(np.square(self._xx(mean, self._std_weight_position, 1e-1)))
+        innovation_cov = np.diag(np.square(
+            self._xx(mean, self._std_weight_position, 1e-1)))
 
         mean = np.dot(self._update_mat, mean)
         covariance = np.linalg.multi_dot((
             self._update_mat, covariance, self._update_mat.T))
         return mean, covariance + innovation_cov
 
-    def update(self, mean, covariance, measurement):
+    def update(self, mean, covariance, observed):
         """Run Kalman filter correction step.
 
         Parameters
@@ -143,7 +154,7 @@ class KalmanFilter:
             The predicted state's mean vector (8 dimensional).
         covariance : ndarray
             The state's covariance matrix (8x8 dimensional).
-        measurement : ndarray
+        observed : ndarray
             The 4 dimensional measurement vector (x, y, a, h), where (x, y)
             is the center position, a the aspect ratio, and h the height of the
             bounding box.
@@ -162,7 +173,7 @@ class KalmanFilter:
             (chol_factor, lower), 
             np.dot(covariance, self._update_mat.T).T,
             check_finite=False).T
-        innovation = measurement - projected_mean
+        innovation = observed - projected_mean
 
         new_mean = mean + np.dot(innovation, kalman_gain.T)
         new_covariance = covariance - np.linalg.multi_dot((

@@ -128,7 +128,7 @@ def matching_cascade(
 
         track_indices_l = [
             k for k in track_indices
-            if tracks[k].time_since_update == 1 + level
+            if tracks[k].steps_since_update == 1 + level
         ]
         if len(track_indices_l) == 0:  # Nothing to match at this level
             continue
@@ -178,8 +178,7 @@ def gate_cost_matrix(
         Returns the modified cost matrix.
 
     """
-    gating_dim = kf.ndim + (0 if only_position else 2)
-    gating_threshold = kalman_filter.chi2inv95[gating_dim]
+    gating_threshold = kalman_filter.chi2inv95[kf.ndim * (1 if only_position else 2)]
     measurements = np.asarray([detections[i].xyah for i in detection_indices])
     for row, track_idx in enumerate(track_indices):
         track = tracks[track_idx]

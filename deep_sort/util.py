@@ -20,13 +20,17 @@ def tlwh2xyah(tlwh):
     """(top left x, top left y, width, height) => (center x, center y, width/height, height)"""
     ndim = get_ndim(tlwh)
     tlwh[...,:ndim] += tlwh[...,ndim:] / 2
-    tlwh[...,ndim] /= tlwh[...,-1]
+    tlwh[...,ndim] /= tlwh[...,ndim+1]
+    if ndim == 3:
+        tlwh[...,-1] /= tlwh[...,ndim+1]
     return tlwh
 
 def xyah2tlwh(xyah):
     """(center x, center y, width/height, height) => (top left x, top left y, width, height)"""
     ndim = get_ndim(xyah)
-    xyah[...,ndim] *= xyah[...,-1]
+    xyah[...,ndim] *= xyah[...,ndim+1]
+    if ndim == 3:
+        xyah[...,-1] *= xyah[...,ndim+1]
     xyah[...,:ndim] -= xyah[...,ndim:] / 2
     return xyah
 
