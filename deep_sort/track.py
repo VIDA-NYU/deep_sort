@@ -1,5 +1,8 @@
 # vim: expandtab:ts=4:sw=4
-
+import time
+import collections
+import numpy as np
+from . import util
 
 class TrackState:
     """
@@ -63,53 +66,60 @@ class Track:
 
     """
 
-    def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None):
-        self.mean = mean
-        self.covariance = covariance
-        self.track_id = track_id
-        self.hits = 1
-        self.age = 1
-        self.time_since_update = 0
-
-        self.state = TrackState.Tentative
-        self.features = []
-        if feature is not None:
-            self.features.append(feature)
-
+    def __init__(self, mean, covariance, track_id, detection, t_obs, color=None, n_init=3, max_age=30):
+        # params
         self._n_init = n_init
         self._max_age = max_age
 
-    def to_tlwh(self):
-        """Get current position in bounding box format `(top left x, top left y,
-        width, height)`.
+        # initial position
+        self.mean = mean
+        self.covariance = covariance
+        self.ndim = len(self.mean)//2
 
-        Returns
-        -------
-        ndarray
-            The bounding box.
+        # initial state
+        self.state = TrackState.Tentative
+        self.track_id = track_id
+        # initial time
+        self.first_seen = self.last_seen = t_obs
+        self.last_predict_time = t_obs
+        self.steps_since_update = 0
+        self.hits = 1
 
-        """
-        ret = self.mean[:4].copy()
-        ret[2] *= ret[3]
-        ret[:2] -= ret[2:] / 2
-        return ret
+        # generate a unique color for the track
+        self.color = np.random.uniform(0, 1, size=3) if color is None else color
 
-    def to_tlbr(self):
-        """Get current position in bounding box format `(min x, miny, max x,
-        max y)`.
+        # tracking detection history
+        self.meta = []
+        self.features = []
+        if detection is not None:
+            self.meta.append(detection.meta)
+            self.features.append(detection.feature)
 
-        Returns
-        -------
-        ndarray
-            The bounding box.
+    @property
+    def age(self):
+        return self.last_predict_time - self.first_seen
 
-        """
-        ret = self.to_tlwh()
-        ret[2:] = ret[:2] + ret[2:]
-        return ret
+    @property
+    def time_since_update(self):
+        return self.last_predict_time - self.last_seen
 
-    def predict(self, kf):
+    @property
+    def xyah(self):
+        return self.mean[:self.ndim].copy()
+
+    @property
+    def tlwh(self):
+        return util.xyah2tlwh(self.xyah)
+
+    @property
+    def tlbr(self):
+        return util.xyah2tlbr(self.xyah)
+    
+    @property
+    def xywh(self):
+        return util.xyah2xywh(self.xyah)
+
+    def predict(self, kf, t_obs):
         """Propagate the state distribution to the current time step using a
         Kalman filter prediction step.
 
@@ -119,11 +129,14 @@ class Track:
             The Kalman filter.
 
         """
-        self.mean, self.covariance = kf.predict(self.mean, self.covariance)
-        self.age += 1
-        self.time_since_update += 1
+        t_obs = t_obs or time.time()
+        self.mean, self.covariance = kf.predict(
+            self.mean, self.covariance, 
+            t_obs - self.last_predict_time)
+        self.steps_since_update += 1
+        self.last_predict_time = t_obs
 
-    def update(self, kf, detection):
+    def update(self, kf, detection, t_obs):
         """Perform Kalman filter measurement update step and update the feature
         cache.
 
@@ -135,26 +148,25 @@ class Track:
             The associated detection.
 
         """
-        self.mean, self.covariance = kf.update(
-            self.mean, self.covariance, detection.to_xyah())
+        self.mean, self.covariance = kf.update(self.mean, self.covariance, detection.xyah)
         self.features.append(detection.feature)
+        self.meta.append(detection.meta)
 
         self.hits += 1
-        self.time_since_update = 0
+        self.steps_since_update = 0
+        self.last_seen = t_obs
         if self.state == TrackState.Tentative and self.hits >= self._n_init:
             self.state = TrackState.Confirmed
 
     def mark_missed(self):
-        """Mark this track as missed (no association at the current time step).
-        """
+        """Mark this track as missed (no association at the current time step)."""
         if self.state == TrackState.Tentative:
             self.state = TrackState.Deleted
-        elif self.time_since_update > self._max_age:
+        elif self.steps_since_update > self._max_age:
             self.state = TrackState.Deleted
 
     def is_tentative(self):
-        """Returns True if this track is tentative (unconfirmed).
-        """
+        """Returns True if this track is tentative (unconfirmed)."""
         return self.state == TrackState.Tentative
 
     def is_confirmed(self):

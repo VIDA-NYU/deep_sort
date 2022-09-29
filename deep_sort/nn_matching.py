@@ -96,7 +96,7 @@ def _nn_cosine_distance(x, y):
     return distances.min(axis=0)
 
 
-class NearestNeighborDistanceMetric(object):
+class NearestNeighborDistanceMetric:
     """
     A nearest neighbor distance metric that, for each target, returns
     the closest distance to any sample that has been observed so far.
@@ -119,17 +119,17 @@ class NearestNeighborDistanceMetric(object):
         that have been observed so far.
 
     """
+    METRICS = {
+        'euclidean': _nn_euclidean_distance,
+        'cosine': _nn_cosine_distance,
+    }
 
     def __init__(self, metric, matching_threshold, budget=None):
-
-
-        if metric == "euclidean":
-            self._metric = _nn_euclidean_distance
-        elif metric == "cosine":
-            self._metric = _nn_cosine_distance
-        else:
-            raise ValueError(
-                "Invalid metric; must be either 'euclidean' or 'cosine'")
+        if not callable(metric):
+            if metric not in self.METRICS:
+                raise ValueError(f"Invalid metric; must be one of {set(self.METRICS)}")
+            metric = self.METRICS[metric]
+        self._metric = metric
         self.matching_threshold = matching_threshold
         self.budget = budget
         self.samples = {}

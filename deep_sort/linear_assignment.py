@@ -128,16 +128,15 @@ def matching_cascade(
 
         track_indices_l = [
             k for k in track_indices
-            if tracks[k].time_since_update == 1 + level
+            if tracks[k].steps_since_update == 1 + level
         ]
         if len(track_indices_l) == 0:  # Nothing to match at this level
             continue
 
-        matches_l, _, unmatched_detections = \
-            min_cost_matching(
-                distance_metric, max_distance, tracks, detections,
-                track_indices_l, unmatched_detections)
-        matches += matches_l
+        matches_l, _, unmatched_detections = min_cost_matching(
+            distance_metric, max_distance, tracks, detections,
+            track_indices_l, unmatched_detections)
+        matches.extend(matches_l)
     unmatched_tracks = list(set(track_indices) - set(k for k, _ in matches))
     return matches, unmatched_tracks, unmatched_detections
 
@@ -179,10 +178,8 @@ def gate_cost_matrix(
         Returns the modified cost matrix.
 
     """
-    gating_dim = 2 if only_position else 4
-    gating_threshold = kalman_filter.chi2inv95[gating_dim]
-    measurements = np.asarray(
-        [detections[i].to_xyah() for i in detection_indices])
+    gating_threshold = kalman_filter.chi2inv95[kf.ndim * (1 if only_position else 2)]
+    measurements = np.asarray([detections[i].xyah for i in detection_indices])
     for row, track_idx in enumerate(track_indices):
         track = tracks[track_idx]
         gating_distance = kf.gating_distance(

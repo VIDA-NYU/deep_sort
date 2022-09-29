@@ -1,8 +1,8 @@
 # vim: expandtab:ts=4:sw=4
 import numpy as np
+from . import util
 
-
-class Detection(object):
+class Detection:
     """
     This class represents a bounding box detection in a single image.
 
@@ -26,24 +26,20 @@ class Detection(object):
 
     """
 
-    def __init__(self, tlwh, confidence, feature):
-        self.tlwh = np.asarray(tlwh, dtype=np.float)
+    def __init__(self, tlwh, confidence, feature, meta=None):
+        self.tlwh = np.asarray(tlwh, dtype=float)
         self.confidence = float(confidence)
         self.feature = np.asarray(feature, dtype=np.float32)
+        self.meta = meta
 
-    def to_tlbr(self):
-        """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
-        `(top left, bottom right)`.
-        """
-        ret = self.tlwh.copy()
-        ret[2:] += ret[:2]
-        return ret
+    @property
+    def xyah(self):
+        return util.tlwh2xyah(self.tlwh.copy())
 
-    def to_xyah(self):
-        """Convert bounding box to format `(center x, center y, aspect ratio,
-        height)`, where the aspect ratio is `width / height`.
-        """
-        ret = self.tlwh.copy()
-        ret[:2] += ret[2:] / 2
-        ret[2] /= ret[3]
-        return ret
+    @property
+    def tlbr(self):
+        return util.tlwh2tlbr(self.tlwh.copy())
+
+    @property
+    def xywh(self):
+        return util.tlwh2xywh(self.tlwh.copy())

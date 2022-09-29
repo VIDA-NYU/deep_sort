@@ -7,58 +7,7 @@ import cv2
 import time
 
 
-def is_in_bounds(mat, roi):
-    """Check if ROI is fully contained in the image.
-
-    Parameters
-    ----------
-    mat : ndarray
-        An ndarray of ndim>=2.
-    roi : (int, int, int, int)
-        Region of interest (x, y, width, height) where (x, y) is the top-left
-        corner.
-
-    Returns
-    -------
-    bool
-        Returns true if the ROI is contain in mat.
-
-    """
-    if roi[0] < 0 or roi[0] + roi[2] >= mat.shape[1]:
-        return False
-    if roi[1] < 0 or roi[1] + roi[3] >= mat.shape[0]:
-        return False
-    return True
-
-
-def view_roi(mat, roi):
-    """Get sub-array.
-
-    The ROI must be valid, i.e., fully contained in the image.
-
-    Parameters
-    ----------
-    mat : ndarray
-        An ndarray of ndim=2 or ndim=3.
-    roi : (int, int, int, int)
-        Region of interest (x, y, width, height) where (x, y) is the top-left
-        corner.
-
-    Returns
-    -------
-    ndarray
-        A view of the roi.
-
-    """
-    sx, ex = roi[0], roi[0] + roi[2]
-    sy, ey = roi[1], roi[1] + roi[3]
-    if mat.ndim == 2:
-        return mat[sy:ey, sx:ex]
-    else:
-        return mat[sy:ey, sx:ex, :]
-
-
-class ImageViewer(object):
+class ImageViewer:
     """An image viewer with drawing routines and video capture capabilities.
 
     Key Bindings:
@@ -147,8 +96,7 @@ class ImageViewer(object):
                 label, cv2.FONT_HERSHEY_PLAIN, 1, self.thickness)
 
             center = pt1[0] + 5, pt1[1] + 5 + text_size[0][1]
-            pt2 = pt1[0] + 10 + text_size[0][0], pt1[1] + 10 + \
-                text_size[0][1]
+            pt2 = pt1[0] + 10 + text_size[0][0], pt1[1] + 10 + text_size[0][1]
             cv2.rectangle(self.image, pt1, pt2, self._color, -1)
             cv2.putText(self.image, label, center, cv2.FONT_HERSHEY_PLAIN,
                         1, (255, 255, 255), self.thickness)
@@ -168,19 +116,11 @@ class ImageViewer(object):
             A text label that is placed at the center of the circle.
 
         """
-        image_size = int(radius + self.thickness + 1.5)  # actually half size
-        roi = int(x - image_size), int(y - image_size), \
-            int(2 * image_size), int(2 * image_size)
-        if not is_in_bounds(self.image, roi):
-            return
-
-        image = view_roi(self.image, roi)
-        center = image.shape[1] // 2, image.shape[0] // 2
-        cv2.circle(
-            image, center, int(radius + .5), self._color, self.thickness)
+        x, y = int(x), int(y)
+        cv2.circle(self.image, (x, y), int(radius + .5), self._color, self.thickness)
         if label is not None:
             cv2.putText(
-                self.image, label, center, cv2.FONT_HERSHEY_PLAIN,
+                self.image, label, (x, y), cv2.FONT_HERSHEY_PLAIN,
                 2, self.text_color, 2)
 
     def gaussian(self, mean, covariance, label=None):
