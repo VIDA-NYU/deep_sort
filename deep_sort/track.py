@@ -86,7 +86,7 @@ class Track:
         self.hits = 1
 
         # generate a unique color for the track
-        self.color = np.random.uniform(0, 1, size=3) if color is None else color
+        self.color = np.random.randint(0, 255, size=3) if color is None else color
 
         # tracking detection history
         self.meta = []
