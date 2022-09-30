@@ -83,3 +83,20 @@ def iou_cost(tracks, detections, track_indices=None,
         candidates = np.asarray([detections[i].tlwh for i in detection_indices])
         cost_matrix[row, :] = 1. - iou(bbox, candidates)
     return cost_matrix
+
+
+def nms(detections, threshold, return_idxs=False):
+    '''non maximum suppression'''
+    active = np.ones(len(detections), dtype=bool)
+    idxs = np.argsort([d.confidence for d in detections])[::-1]
+    boxes = np.array([d.tlwh for d in detections])
+    for i in idxs:
+        if not active[i]: continue
+        j_active = idxs[i+1:]
+        j_active = j_active[active[j_active]]
+        c = iou(boxes[i], boxes[j_active])
+        active[j_active[c > threshold]] = 0
+    idxs = idxs[active[idxs]]
+    if return_idxs:
+        return idxs
+    return [detections[i] for i in idxs]
