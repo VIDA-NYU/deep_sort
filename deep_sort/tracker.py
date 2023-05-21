@@ -44,7 +44,7 @@ class Tracker:
         self.n_init = n_init
 
         self.kf = kalman_filter.KalmanFilter(ndim=ndim)
-        self.tracks = []
+        self.tracks = {}
         self._next_id = 1
 
     def step(self, detections, t_obs):
@@ -58,7 +58,7 @@ class Tracker:
 
         This function should be called once every time step, before `update`.
         """
-        for track in self.tracks:
+        for track in self.tracks.values():
             track.predict(self.kf, t_obs)
 
     def update(self, detections, t_obs):
@@ -72,50 +72,84 @@ class Tracker:
         """
         # Run matching cascade - match detections to tracks
         matches, unmatched_tracks, unmatched_detections = self._match(detections)
+        self._update(detections, t_obs, matches, unmatched_tracks, unmatched_detections)
 
+    def _get_unmatched(self, detections, matches):
+        track_ids = set(self.tracks)
+        matched_track_ids, matched_detections = zip(*matches)
+        unmatched_tracks = track_ids - set(matched_track_ids)
+        unmatched_detections = set(range(len(detections))) - set(matched_detections)
+        return unmatched_tracks, unmatched_detections
+
+    def _update(self, detections, t_obs, matches, unmatched_tracks=None, unmatched_detections=None):
         # Update matched tracks
         for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(self.kf, detections[detection_idx], t_obs)
+            if track_idx not in self.tracks:
+                self._initiate_track(detections[detection_idx], t_obs, track_idx)
+            else:
+                self.tracks[track_idx].update(self.kf, detections[detection_idx], t_obs)
+
+        # auto-detect missed track ids and detections
+        matched_track_ids, matched_detections = zip(*matches)
+        if unmatched_detections is None:
+            unmatched_detections = set(range(len(detections))) - set(matched_detections)
+        if unmatched_tracks is None:
+            unmatched_tracks = set(self.tracks) - set(matched_track_ids)
 
         # missed tracks
-        for track_idx in unmatched_tracks:
+        for track_idx in unmatched_tracks or []:
             self.tracks[track_idx].mark_missed()
 
         # new detections
-        for detection_idx in unmatched_detections:
+        for detection_idx in unmatched_detections or []:
             self._initiate_track(detections[detection_idx], t_obs)
 
         # deleted tracks
-        self.tracks = [t for t in self.tracks if not t.is_deleted()]
+        deleted = {
+            tid: self.tracks.pop(tid) 
+            for tid in set(self.tracks) 
+            if self.tracks[tid].is_deleted()
+        }
 
         # update nearest neighbors using features
         self._fit()
+        return deleted
+
+    # def _delete_tracks(self, tracks):
+    #     if hasattr(self.metric, 'delete_targets'):
+    #         self.metric.delete_targets([t.track_id for t in tracks])
+
+    def _gated_metric(self, tracks, dets, track_indices, detection_indices):
+        '''Match based on appearance features.'''
+        features = np.array([dets[i].feature for i in detection_indices])
+        targets = np.array([tracks[i].track_id for i in track_indices])
+        cost_matrix = self.metric.distance(features, targets)
+        cost_matrix = linear_assignment.gate_cost_matrix(
+            self.kf, cost_matrix, tracks, dets, track_indices,
+            detection_indices)
+        return cost_matrix
+    
+    def gated_metric(self, dets, track_indices=None):
+        confirmed_tracks = [i for i, t in self.tracks.items() if t.is_confirmed()]
+        track_ids = track_indices or list(confirmed_tracks)
+        cost = self._gated_metric(self.tracks, dets, track_ids, range(len(dets)))
+        return cost, track_ids
 
     def _match(self, detections):
         # match confirmed tracks based on appearance, 
         # match remaining unmatched/confirmed tracks with IoU
 
-        def gated_metric(tracks, dets, track_indices, detection_indices):
-            '''Match based on appearance features.'''
-            features = np.array([dets[i].feature for i in detection_indices])
-            targets = np.array([tracks[i].track_id for i in track_indices])
-            cost_matrix = self.metric.distance(features, targets)
-            cost_matrix = linear_assignment.gate_cost_matrix(
-                self.kf, cost_matrix, tracks, dets, track_indices,
-                detection_indices)
-            return cost_matrix
-
         # Split track set into confirmed and unconfirmed tracks.
         confirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if t.is_confirmed()]
+            i for i, t in enumerate(self.tracks.values()) if t.is_confirmed()]
         unconfirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if not t.is_confirmed()]
+            i for i, t in enumerate(self.tracks.values()) if not t.is_confirmed()]
 
         # Associate confirmed tracks using appearance features.
         matches_a, unmatched_tracks_a, unmatched_detections = \
             linear_assignment.matching_cascade(
-                gated_metric, self.metric.matching_threshold, self.max_age,
-                self.tracks, detections, confirmed_tracks)
+                self._gated_metric, self.metric.matching_threshold, self.max_age,
+                self.tracks.values(), detections, confirmed_tracks)
 
         # get unmatched tracks that were visible in the last frame to do IoU comparison
         iou_track_candidates = unconfirmed_tracks + [
@@ -128,7 +162,7 @@ class Tracker:
         # Associate remaining tracks together with unconfirmed tracks using IOU.
         matches_b, unmatched_tracks_b, unmatched_detections = \
             linear_assignment.min_cost_matching(
-                iou_matching.iou_cost, self.max_iou_distance, self.tracks,
+                iou_matching.iou_cost, self.max_iou_distance, self.tracks.values(),
                 detections, iou_track_candidates, unmatched_detections)
 
         matches = matches_a + matches_b
@@ -137,7 +171,7 @@ class Tracker:
 
     def _fit(self):
         # collect track features
-        confirmed_tracks = [t for t in self.tracks if t.is_confirmed()]
+        confirmed_tracks = [t for t in self.tracks.values() if t.is_confirmed()]
         active_targets = [t.track_id for t in confirmed_tracks]
         features, targets = [], []
         for track in confirmed_tracks:
@@ -151,13 +185,15 @@ class Tracker:
             np.asarray(targets), 
             np.asarray(active_targets))
 
-    def _initiate_track(self, detection, t_obs):
+    def _initiate_track(self, detection, t_obs, track_id=None):
         # create new track
         mean, covariance = self.kf.initiate(detection.xyah)
-        self.tracks.append(Track(
-            mean, covariance, self._next_id, 
+        if track_id is None:
+            track_id = self._next_id
+        self.tracks[track_id] = Track(
+            mean, covariance, track_id, 
             detection=detection,
             t_obs=t_obs, 
             n_init=self.n_init, 
-            max_age=self.max_age))
-        self._next_id += 1
+            max_age=self.max_age)
+        self._next_id = max(self.tracks) + 1
