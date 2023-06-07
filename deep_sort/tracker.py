@@ -76,7 +76,7 @@ class Tracker:
 
     def _get_unmatched(self, detections, matches):
         track_ids = set(self.tracks)
-        matched_track_ids, matched_detections = zip(*matches)
+        matched_track_ids, matched_detections = tuple(zip(*matches)) or ((), ())
         unmatched_tracks = track_ids - set(matched_track_ids)
         unmatched_detections = set(range(len(detections))) - set(matched_detections)
         return unmatched_tracks, unmatched_detections
@@ -90,7 +90,7 @@ class Tracker:
                 self.tracks[track_idx].update(self.kf, detections[detection_idx], t_obs)
 
         # auto-detect missed track ids and detections
-        matched_track_ids, matched_detections = zip(*matches)
+        matched_track_ids, matched_detections = tuple(zip(*matches)) or ((), ())
         if unmatched_detections is None:
             unmatched_detections = set(range(len(detections))) - set(matched_detections)
         if unmatched_tracks is None:
